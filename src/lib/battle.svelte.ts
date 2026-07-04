@@ -1,5 +1,5 @@
 import type { WikiCard, Stats } from "./wikipedia.model"
-import { type Action, type MoveRecord, calcBossAction, handleAttack } from "./battle-engine"
+import { type Action, type MoveRecord, calcBossAction, calcBlockAmount, enrageMultiplier, handleAttack } from "./battle-engine"
 import { authState } from "./auth.svelte"
 
 export type { Action }
@@ -30,7 +30,7 @@ let cards: WikiCard[] = []
 
 let bossTurn = $state(0)
 
-// Move sequence is validated server side, along with permanently banning any users with invalid sequences
+// Move sequence is validated server side; rejected rounds are rolled back to the server's state
 let sequence: Move[] = []
 
 export function startAction(type: Action, card: WikiCard) {
@@ -44,12 +44,15 @@ export function registerCard(card: WikiCard) {
 export async function selectTarget(card: WikiCard) {
     if (!pendingAction) return
     if (card.stats!.hp <= 0) return
+    // Attacks may only target the boss (matches server validation); blocks only teammates
+    if (pendingAction.type === 'attack' && card !== bossCard) return
+    if (pendingAction.type === 'block' && card === bossCard) return
     const action = pendingAction
     pendingAction = null
     await enterMove({...action, target: card})
 }
 
-export async function enterMove(move: Move) {
+export async function enterMove(move: Move, bossDamageMult: number = 1) {
     if (bossCard == null) return
     if (move.card !== bossCard && move.card.stats!.hp <= 0) return
 
@@ -62,11 +65,11 @@ export async function enterMove(move: Move) {
         if (move.card.rarity === 'boss') {
             blockTarget.hp = Math.min(blockTarget.hp + stats.def, bossMaxHp)
         } else {
-            blockTarget.currentBlock += stats.def
+            blockTarget.currentBlock += calcBlockAmount(stats.def)
         }
     } else if (move.type === 'attack') {
         if (move.target === 'all') {
-            cards.forEach(c => handleAttack(stats, c.stats!, move.card.category, c.category))
+            cards.forEach(c => handleAttack(stats, c.stats!, move.card.category, c.category, bossDamageMult))
         } else {
             handleAttack(stats, move.target.stats!, move.card.category, move.target.category)
             if (move.target === bossCard && bossCard.stats!.hp <= 0) {
@@ -87,28 +90,43 @@ export async function enterMove(move: Move) {
             targetTitle: m.target === 'all' ? 'all' : m.target.title
         }))
 
-        const token = await authState.user!.getIdToken()
-        const response = await fetch('/home', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ moves: roundMoves })
-        })
-        const result = await response.json()
+        try {
+            const token = await authState.user!.getIdToken()
+            const response = await fetch('/home', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ moves: roundMoves })
+            })
+            if (!response.ok) {
+                sequence = sequence.slice(0, lastBossIdx + 1)
+                return
+            }
+            const result = await response.json()
 
-        if (result.state === 'won') {
-            handleBattleOver(result.kept)
-        } else if (result.state === 'lost' || result.state === 'ongoing') {
-            const bossAction = calcBossAction(bossCard!.stats!, bossTurn)
-            bossTurn++
-            await enterMove({ type: bossAction, card: bossCard!, target: 'all' })
-            cards.forEach(c => c.stats!.currentBlock = 0)
-            bossCard!.stats!.currentBlock = 0
-            if (result.state === 'lost') handleBattleOver(result.kept)
+            if (result.state === 'invalid') {
+                // Server rejected the round: drop its moves and snap back to the authoritative state
+                sequence = sequence.slice(0, lastBossIdx + 1)
+                if (result.battle) restoreBattleState(result.battle)
+            } else if (result.state === 'won') {
+                if (result.battle) restoreBattleState(result.battle)
+                handleBattleOver(result.kept)
+            } else if (result.state === 'lost' || result.state === 'ongoing') {
+                // Play the boss move locally for animation, then sync to the server's state
+                const bossAction = calcBossAction(bossCard!.stats!, bossTurn)
+                const bossDamageMult = enrageMultiplier(bossTurn)
+                bossTurn++
+                await enterMove({ type: bossAction, card: bossCard!, target: 'all' }, bossDamageMult)
+                cards.forEach(c => c.stats!.currentBlock = 0)
+                bossCard!.stats!.currentBlock = 0
+                if (result.battle) restoreBattleState(result.battle)
+                if (result.state === 'lost') handleBattleOver(result.kept)
+            }
+        } finally {
+            roundLoading = false
         }
-        roundLoading = false
     }
 }
 
@@ -154,6 +172,11 @@ export function restoreBattleState(state: BattleState) {
 export function getNextBossAction() {
     if (!bossCard) return null
     return calcBossAction(bossCard.stats!, bossTurn)
+}
+
+// Enrage multiplier for the boss's upcoming turn (1 until ENRAGE_TURN)
+export function getEnrageMultiplier() {
+    return enrageMultiplier(bossTurn)
 }
 
 export function getPendingAction() {

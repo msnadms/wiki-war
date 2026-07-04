@@ -46,7 +46,11 @@
         return () => clearTimeout(attackedTimer);
     });
     const animationTime = $derived(onTable ? 75 : 1000)
-    const isPotentialTarget = $derived(getPendingAction() !== null && !onTable);
+    const pending = $derived(getPendingAction());
+    const isPotentialTarget = $derived(
+        pending !== null && !onTable &&
+        (pending.type === 'attack' ? article.rarity === 'boss' : article.rarity !== 'boss')
+    );
     const disabled: boolean = $derived(article.stats!.hp <= 0);
     const loading = $derived(isRoundLoading())
 

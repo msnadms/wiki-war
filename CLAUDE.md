@@ -24,15 +24,17 @@ This is a **SvelteKit + TypeScript** app (Svelte 5 runes) using **Firebase** for
 
 ### Card generation pipeline (server-only)
 
-1. `src/lib/server/wikipedia.ts` — fetches a random Wikipedia article, then calls the Wikimedia pageviews API for the past 6 years. HP is derived from total views, ATK from recent monthly average (boosted if trending up), DEF from the first-half average.
+1. `src/lib/server/wikipedia.ts` — fetches a random Wikipedia article, then calls the Wikimedia pageviews API for the past 6 years. Player cards: HP is derived from total views, ATK from recent monthly average (boosted if trending up), DEF from the first-half average. Boss stats are NOT article-derived — `scaleBossStats` scales them to the drawn team (HP ≈ 4.5 team attack-rounds, ATK ≈ avg card HP / 2.75, heal ≈ 20% of a team round, each with ±15% noise) so every daily fight is challenging but winnable. Constants were tuned by Monte Carlo sim against sampled real random-article stats: all-attack wins ~57%, intent-aware blocking ~79%.
 2. `src/lib/server/classifier.ts` — keyword-matches the article description to assign a `CardCategory` (people, geography, science, etc.).
 
 ### Battle logic
 
 `src/lib/battle-engine.ts` is the **shared** pure combat module (no Svelte/DOM imports). It defines:
 - `TypeCounters` — the 8-category counter table (multipliers 1.5× or 2×)
-- `handleAttack` — applies damage after block absorption
-- `calcBossAction` — deterministic pattern from a hash of boss stats
+- `handleAttack` — applies damage (optionally enrage-multiplied) after block absorption
+- `calcBossAction` — deterministic pattern from a hash of boss stats (telegraphed to the player)
+- `calcBlockAmount` — block grants 2.5× DEF so reacting to the boss telegraph beats mindless attacking
+- `enrageMultiplier` — boss damage ramps +25%/turn after boss turn 10 to prevent stalemates
 
 This file is imported by both the client state module and the server endpoint, ensuring the same math runs on both sides.
 

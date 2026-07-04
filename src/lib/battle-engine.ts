@@ -29,6 +29,21 @@ function getMultiplier(attacker?: CardCategory, target?: CardCategory): number {
     return TypeCounters[attacker].find(c => c.category === target)?.multiplier ?? 1
 }
 
+// Blocking must outvalue a def-sized shield or attacking always dominates;
+// 2.5x makes reacting to the boss telegraph the winning play (Monte Carlo tuned)
+export const BLOCK_MULTIPLIER = 2.5
+export const ENRAGE_TURN = 10
+const ENRAGE_RAMP = 0.25
+
+export function calcBlockAmount(def: number): number {
+    return Math.ceil(def * BLOCK_MULTIPLIER)
+}
+
+// Boss damage ramps after ENRAGE_TURN so battles cannot stall indefinitely
+export function enrageMultiplier(turn: number): number {
+    return turn >= ENRAGE_TURN ? 1 + ENRAGE_RAMP * (turn - ENRAGE_TURN + 1) : 1
+}
+
 export function calcBossAction(bossStats: Stats, turn: number): Action {
     const { atk, def } = bossStats
     const seed = atk + def * 31
@@ -38,15 +53,15 @@ export function calcBossAction(bossStats: Stats, turn: number): Action {
         ['attack', 'block', 'attack'],
         ['attack', 'attack', 'attack'],
         ['block', 'attack', 'attack'],
-        ['attack', 'block', 'block'],
+        ['attack', 'attack', 'block'],
     ]
     const pattern = patterns[hash % patterns.length]
     return pattern[turn % pattern.length]
 }
 
-export function handleAttack(stats: Stats, target: Stats, attackerCategory?: CardCategory, targetCategory?: CardCategory): void {
+export function handleAttack(stats: Stats, target: Stats, attackerCategory?: CardCategory, targetCategory?: CardCategory, damageMult: number = 1): void {
     if (target.hp <= 0 || stats.hp <= 0) return
-    const damage = Math.ceil(stats.atk * getMultiplier(attackerCategory, targetCategory))
+    const damage = Math.ceil(stats.atk * getMultiplier(attackerCategory, targetCategory) * damageMult)
     target.hp -= Math.max(damage - target.currentBlock, 0)
     target.currentBlock = Math.max(target.currentBlock - damage, 0)
 }

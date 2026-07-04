@@ -5,7 +5,7 @@
     import type { WikiCard } from '$lib/wikipedia.model.js';
     import { authState } from '$lib/auth.svelte.js';
     import Card from '$lib/components/Card.svelte';
-    import { getNextBossAction, isRoundLoading, resetBattle, restoreBattleState, type BattleState } from '$lib/battle.svelte';
+    import { getEnrageMultiplier, getNextBossAction, isRoundLoading, resetBattle, restoreBattleState, type BattleState } from '$lib/battle.svelte';
     import swords from '$lib/assets/swords.svg';
     import shield from '$lib/assets/shield.svg';
     import flip from '$lib/assets/flip.svg';
@@ -21,6 +21,7 @@
     let loading = $state(false);
     let battleLoading = $derived(isRoundLoading())
     const nextAction = $derived(getNextBossAction())
+    const enrageMult = $derived(getEnrageMultiplier())
     let flipSignal = $state(0)
     let formEl: HTMLFormElement;
 
@@ -38,11 +39,16 @@
         <div class="board">
             <div class="boss-display">
                 <div class="boss"><Card bind:article={boss} index={0} /></div>
-                {#if nextAction === 'attack'}
-                    <img src={swords} alt="ATK" class="action" title="Boss intends to attack next turn" />
-                {:else if nextAction === 'block'}
-                    <img src={shield} alt="DEF" class="action" title="Boss intends to heal next turn" />
-                {/if}
+                <div class="boss-intent">
+                    {#if nextAction === 'attack'}
+                        <img src={swords} alt="ATK" class="action" title="Boss intends to attack next turn" />
+                    {:else if nextAction === 'block'}
+                        <img src={shield} alt="DEF" class="action" title="Boss intends to heal next turn" />
+                    {/if}
+                    {#if enrageMult > 1}
+                        <p class="enrage" title="The boss is enraged: its attacks deal increased damage">ENRAGED &times;{enrageMult}</p>
+                    {/if}
+                </div>
             </div>
             <div class="bottom-board">
                 <button onclick={() => flipSignal++}><img src={flip} alt="flip" class="flip" /></button>
@@ -178,6 +184,19 @@
     }
     .boss-display .action {
         filter: invert(12%) sepia(65%) saturate(2827%) hue-rotate(346deg) brightness(97%) contrast(119%);
+    }
+    .boss-intent {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        align-self: center;
+        gap: 4px;
+    }
+    .boss-intent .enrage {
+        color: #c00000;
+        font-weight: bold;
+        letter-spacing: 0.08em;
+        font-size: 14px;
     }
     .boss-display .boss {
         grid-column-start: 2;

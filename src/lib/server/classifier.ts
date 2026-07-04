@@ -56,8 +56,16 @@ const CATEGORY_RULES: [CardCategory, string[]][] = [
     ]],
 ];
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// \b boundaries instead of space-padding so keywords match next to punctuation ("American actor, born...")
+const CATEGORY_MATCHERS: [CardCategory, RegExp][] = CATEGORY_RULES.map(([category, keywords]) => [
+    category,
+    new RegExp(`\\b(?:${keywords.map(escapeRegExp).join('|')})\\b`),
+]);
+
 export function classifyDescription(description: string | undefined): CardCategory {
     if (!description) return 'neutral';
-    const d = ' ' + description.toLowerCase() + ' ';
-    return CATEGORY_RULES.find(([, keywords]) => keywords.some(k => d.includes(' ' + k + ' ')))?.[0] ?? 'neutral';
+    const d = description.toLowerCase();
+    return CATEGORY_MATCHERS.find(([, re]) => re.test(d))?.[0] ?? 'neutral';
 }

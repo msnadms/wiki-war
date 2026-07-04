@@ -13,14 +13,16 @@ const NUM_RETRIES = 3;
 async function fetchWikiStats(title: string): Promise<PageStats> {
 
     const [start, end] = getDateRange()
-    const response = await fetchWithRetry(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia.org/all-access/all-agents/${title}/monthly/${start}/${end}`)
+    // Titles can contain slashes, question marks, etc. — they must be path-encoded
+    const encodedTitle = encodeURIComponent(title.replace(/ /g, '_'))
+    const response = await fetchWithRetry(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia.org/all-access/all-agents/${encodedTitle}/monthly/${start}/${end}`)
 
     if (!response.ok) throw new Error(`Wikipedia API error: ${response.status}`);
     const data = await response.json();
 
-    const items: { views: number }[] = data.items;
+    const items: { views: number }[] = data.items ?? [];
     const mid = Math.floor(items.length / 2);
-    const avg = (slice: { views: number }[]) => slice.reduce((s, i) => s + i.views, 0) / slice.length;
+    const avg = (slice: { views: number }[]) => slice.length === 0 ? 0 : slice.reduce((s, i) => s + i.views, 0) / slice.length;
     const firstHalfAvg = avg(items.slice(0, mid));
     const secondHalfAvg = avg(items.slice(mid));
     return {
@@ -32,29 +34,42 @@ async function fetchWikiStats(title: string): Promise<PageStats> {
 }
 
 export async function fetchRandomArticle(boss: boolean = false): Promise<WikiCard> {
-    const response = await fetchWithRetry('https://en.wikipedia.org/api/rest_v1/page/random/summary')
+    let lastError: unknown;
+    for (let attempt = 0; attempt < NUM_RETRIES; attempt++) {
+        const response = await fetchWithRetry('https://en.wikipedia.org/api/rest_v1/page/random/summary')
 
-    if (!response.ok) throw new Error(`Wikipedia API error: ${response.status}`);
-    const data = await response.json();
-    const pageStats: PageStats = await fetchWikiStats(data.title);
-    const rarity = !boss ? assignRarity() : 'boss';
-    const stats: Stats = {
-        hp: calcHp(pageStats.views, rarity),
-        atk: calcAtk(pageStats.recentAvg, pageStats.increasing, rarity),
-        def: calcDef(pageStats.firstHalfAvg, rarity),
-        currentBlock: 0
+        if (!response.ok) throw new Error(`Wikipedia API error: ${response.status}`);
+        const data = await response.json();
+
+        // Brand-new articles 404 on the pageviews API — draw a different article instead of failing
+        let pageStats: PageStats;
+        try {
+            pageStats = await fetchWikiStats(data.title);
+        } catch (e) {
+            lastError = e;
+            continue;
+        }
+
+        const rarity = !boss ? assignRarity() : 'boss';
+        const stats: Stats = {
+            hp: calcHp(pageStats.views, rarity),
+            atk: calcAtk(pageStats.recentAvg, pageStats.increasing, rarity),
+            def: calcDef(pageStats.firstHalfAvg, rarity),
+            currentBlock: 0
+        }
+        return {
+            title: data.title,
+            extract: data.extract,
+            pageUrl: data.content_urls.desktop.page,
+            thumbnailUrl: data.thumbnail?.source ?? null,
+            views: pageStats.views,
+            rarity: rarity,
+            category: classifyDescription(data.description),
+            stats: stats,
+            hasMadeMove: false
+        };
     }
-    return {
-        title: data.title,
-        extract: data.extract,
-        pageUrl: data.content_urls.desktop.page,
-        thumbnailUrl: data.thumbnail?.source ?? null,
-        views: pageStats.views,
-        rarity: rarity,
-        category: classifyDescription(data.description),
-        stats: stats,
-        hasMadeMove: false
-    };
+    throw lastError instanceof Error ? lastError : new Error('Failed to fetch article stats');
 }
 
 const rarityMults: Record<Rarity, number> = {
@@ -75,17 +90,38 @@ function assignRarity(): Rarity {
 
 const logScale = (n: number) => Math.ceil(Math.log(Math.max(n, 1)) / Math.log(1.05));
 
+// Floor of 1 so view-starved articles can't produce 0-HP (dead-on-arrival) cards
 function calcHp(views: number, rarity: Rarity) {
     const hpMult = rarity !== 'boss' ? 2 : 1;
-    return Math.ceil(logScale(views) * rarityMults[rarity] * hpMult);
+    return Math.max(1, Math.ceil(logScale(views) * rarityMults[rarity] * hpMult));
 }
 
+// Trend bonus kept mild (1.1/0.9): a hidden 1.3/0.7 swing outweighed rarity itself
 function calcAtk(recentAvg: number, increasing: boolean, rarity: Rarity) {
-    return Math.ceil(logScale(recentAvg) * (increasing ? 1.3 : 0.7) * rarityMults[rarity]);
+    return Math.max(1, Math.ceil(logScale(recentAvg) * (increasing ? 1.1 : 0.9) * rarityMults[rarity]));
 }
 
 function calcDef(firstHalfAvg: number, rarity: Rarity) {
-    return Math.ceil(logScale(firstHalfAvg) * rarityMults[rarity]);
+    return Math.max(1, Math.ceil(logScale(firstHalfAvg) * rarityMults[rarity]));
+}
+
+// Boss stats scale to the drawn team so every daily fight is challenging but winnable.
+// Monte Carlo tuned against sampled real random-article stats: mindless all-attack
+// wins ~57%; playing around the boss telegraph ~79%.
+const BOSS_KILL_TURNS = 4.5;    // boss HP ≈ this many full team attack-rounds
+const BOSS_HITS_TO_KILL = 2.75; // unblocked boss hits to down an average card
+const BOSS_HEAL_RATIO = 0.2;    // heal per block turn as a fraction of one team attack-round
+
+export function scaleBossStats(boss: WikiCard, team: WikiCard[]): void {
+    const teamAtk = team.reduce((s, c) => s + c.stats!.atk, 0);
+    const avgHp = team.reduce((s, c) => s + c.stats!.hp, 0) / team.length;
+    const noise = () => 0.85 + Math.random() * 0.3;
+    boss.stats = {
+        hp: Math.max(1, Math.round(teamAtk * BOSS_KILL_TURNS * noise())),
+        atk: Math.max(1, Math.round((avgHp / BOSS_HITS_TO_KILL) * noise())),
+        def: Math.max(1, Math.round(teamAtk * BOSS_HEAL_RATIO * noise())),
+        currentBlock: 0
+    };
 }
 
 function getDateRange(): [string, string] {

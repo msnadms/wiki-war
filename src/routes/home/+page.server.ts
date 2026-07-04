@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions } from './$types';
 import { getAdminDb, getAdminAuth } from '$lib/server/firebase-admin';
-import { fetchRandomArticle } from '$lib/server/wikipedia';
+import { fetchRandomArticle, scaleBossStats } from '$lib/server/wikipedia';
 import type { WikiCard } from '$lib/wikipedia.model';
 
 async function verifyToken(formData: FormData): Promise<{ uid: string } | ReturnType<typeof fail>> {
@@ -41,6 +41,7 @@ export const actions: Actions = {
                 fetchRandomArticle(true),
                 ...Array.from({ length: 3 }, () => fetchRandomArticle()),
             ]);
+            scaleBossStats(boss, articles);
         } catch (e) {
             return fail(503, { error: e instanceof Error ? e.message : 'Failed to fetch articles' });
         }
