@@ -22,9 +22,11 @@ export interface WikiCard {
     extract: string;
     pageUrl: string;
     thumbnailUrl?: string | null;
+    views: number;
     rarity: Rarity;
     category?: CardCategory;
     stats?: Stats;
     hasMadeMove?: boolean
     battleOver?: boolean
+    kept?: boolean
 }

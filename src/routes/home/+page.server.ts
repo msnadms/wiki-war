@@ -33,10 +33,6 @@ export const actions: Actions = {
             return { articles: data.cards as WikiCard[], boss: data.boss as WikiCard, useDaily: true, battleState: data.state ?? null };
         }
 
-        const cardsRef = db.collection('users').doc(uid).collection('cards');
-        const existing = await cardsRef.get();
-        const existingTitles = new Set(existing.docs.map(doc => doc.data().title as string));
-
         console.log('No cards found. Calling wikipedia...')
         let articles: WikiCard[];
         let boss: WikiCard;
@@ -48,12 +44,7 @@ export const actions: Actions = {
         } catch (e) {
             return fail(503, { error: e instanceof Error ? e.message : 'Failed to fetch articles' });
         }
-
-        const newCards = articles.filter(card => !existingTitles.has(card.title));
-        await Promise.all([
-            dailyRef.set({ cards: articles, boss }),
-            ...newCards.map(card => cardsRef.add(card))
-        ]);
+        await dailyRef.set({ cards: articles, boss })
 
         return { articles, boss, useDaily: false };
     },

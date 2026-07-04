@@ -49,6 +49,7 @@ export async function fetchRandomArticle(boss: boolean = false): Promise<WikiCar
         extract: data.extract,
         pageUrl: data.content_urls.desktop.page,
         thumbnailUrl: data.thumbnail?.source ?? null,
+        views: pageStats.views,
         rarity: rarity,
         category: classifyDescription(data.description),
         stats: stats,
@@ -58,10 +59,10 @@ export async function fetchRandomArticle(boss: boolean = false): Promise<WikiCar
 
 const rarityMults: Record<Rarity, number> = {
     common: 1,
-    uncommon: 1.2,
-    rare: 1.5,
-    legendary: 2,
-    boss: 2.5
+    uncommon: 1.5,
+    rare: 2,
+    legendary: 2.5,
+    boss: 4
 }
 
 function assignRarity(): Rarity {
@@ -75,7 +76,8 @@ function assignRarity(): Rarity {
 const logScale = (n: number) => Math.ceil(Math.log(Math.max(n, 1)) / Math.log(1.05));
 
 function calcHp(views: number, rarity: Rarity) {
-    return Math.ceil(logScale(views) * rarityMults[rarity]);
+    const hpMult = rarity !== 'boss' ? 2 : 1;
+    return Math.ceil(logScale(views) * rarityMults[rarity] * hpMult);
 }
 
 function calcAtk(recentAvg: number, increasing: boolean, rarity: Rarity) {

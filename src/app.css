@@ -42,7 +42,7 @@ button:disabled {
 }
 
 .open {
-    box-shadow: 0 0 10px 7px #d3a200;
+    box-shadow: 0 0 20px 14px #d3a200;
     background: linear-gradient(-45deg, #d3a200, #ffe9a0, #b38a04);
     background-size: 400% 400%;
     animation: gradient 5s ease infinite, slideIn 0.4s ease both;

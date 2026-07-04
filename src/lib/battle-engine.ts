@@ -34,7 +34,7 @@ export function calcBossAction(bossStats: Stats, turn: number): Action {
     const seed = atk + def * 31
     const hash = (seed * 2654435761) >>> 0
     const patterns: Action[][] = [
-        ['attack', 'attack', 'block'],
+        ['attack', 'block', 'block'],
         ['attack', 'block', 'attack'],
         ['attack', 'attack', 'attack'],
         ['block', 'attack', 'attack'],

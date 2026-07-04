@@ -24,10 +24,11 @@ export interface BattleState {
 
 let pendingAction: PendingAction | null = $state(null)
 let bossCard: WikiCard | null = $state(null)
+let bossMaxHp: number = 0
 let roundLoading = $state(false)
 let cards: WikiCard[] = []
 
-let bossTurn = 0
+let bossTurn = $state(0)
 
 // Move sequence is validated server side, along with permanently banning any users with invalid sequences
 let sequence: Move[] = []
@@ -58,7 +59,11 @@ export async function enterMove(move: Move) {
     const stats = move.card.stats!
     if (move.type === 'block') {
         const blockTarget = move.target === 'all' ? stats : move.target.stats!
-        blockTarget.currentBlock += stats.def
+        if (move.card.rarity === 'boss') {
+            blockTarget.hp = Math.min(blockTarget.hp + stats.def, bossMaxHp)
+        } else {
+            blockTarget.currentBlock += stats.def
+        }
     } else if (move.type === 'attack') {
         if (move.target === 'all') {
             cards.forEach(c => handleAttack(stats, c.stats!, move.card.category, c.category))
@@ -94,27 +99,33 @@ export async function enterMove(move: Move) {
         const result = await response.json()
 
         if (result.state === 'won') {
-            handleBattleOver()
+            handleBattleOver(result.kept)
         } else if (result.state === 'lost' || result.state === 'ongoing') {
             const bossAction = calcBossAction(bossCard!.stats!, bossTurn)
             bossTurn++
             await enterMove({ type: bossAction, card: bossCard!, target: 'all' })
-            if (result.state === 'lost') handleBattleOver()
+            cards.forEach(c => c.stats!.currentBlock = 0)
+            bossCard!.stats!.currentBlock = 0
+            if (result.state === 'lost') handleBattleOver(result.kept)
         }
         roundLoading = false
     }
 }
 
-function handleBattleOver() {
+function handleBattleOver(kept: string[] = []) {
+    const keptSet = new Set(kept)
     cards.forEach((card) => {
         card.battleOver = true
         card.hasMadeMove = false
+        card.kept = card.kept || keptSet.has(card.title)
     })
     bossCard!.battleOver = true
 }
 
 export function setBoss(boss: WikiCard | null) {
     bossCard = boss
+    if (!boss) return
+    bossMaxHp = boss.stats!.hp
 }
 
 export function resetBattle() {
@@ -138,6 +149,11 @@ export function restoreBattleState(state: BattleState) {
     }
     if (bossCard) Object.assign(bossCard.stats!, state.bossStats)
     if (state.battleOver) handleBattleOver()
+}
+
+export function getNextBossAction() {
+    if (!bossCard) return null
+    return calcBossAction(bossCard.stats!, bossTurn)
 }
 
 export function getPendingAction() {

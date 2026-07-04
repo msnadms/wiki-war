@@ -49,6 +49,9 @@ export const POST: RequestHandler = async ({request}) => {
         if (moves.length === 0 || moves.length > aliveCount) return { state: 'invalid' }
         const allMoved = moves.length === aliveCount
 
+        Object.values(state.playerStats).forEach(s => s.currentBlock = 0)
+        state.bossStats.currentBlock = 0
+
         const movedTitles = new Set<string>()
         for (const move of moves) {
 
@@ -71,33 +74,37 @@ export const POST: RequestHandler = async ({request}) => {
         }
         if (state.bossStats.hp <= 0) {
             state.battleOver = true
-            transaction.update(dailyRef, { state })
-            cards.map(async (card) => await cardsRef.add(card))
-            return { state: 'won' }
+            cards.forEach((card) => card.kept = true)
+            transaction.update(dailyRef, { state, cards: cards })
+            return { state: 'won', cardsToWrite: cards }
         }
         if (!allMoved) return { state: 'invalid' }
 
         const action = calcBossAction(state.bossStats, state.turn)
-        state.turn++ 
+        state.turn++
         if (action === 'attack') {
             cards
                 .filter((card) => state.playerStats[card.title].hp > 0)
                 .forEach((card) =>
                     handleAttack(state.bossStats, state.playerStats[card.title], boss.category, card.category))
         } else {
-            state.bossStats.currentBlock += state.bossStats.def
+            state.bossStats.hp = Math.min(state.bossStats.hp + state.bossStats.def, boss.stats!.hp)
         }
         if (Object.values(state.playerStats).every((stats) => stats.hp <= 0)) {
             state.battleOver = true
-            transaction.update(dailyRef, { state })
-            const keptCard = cards[Math.floor(Math.random() * cards.length)]
-            await cardsRef.add(keptCard)
-            return { state: 'lost', card: keptCard.title }
+            const idx = Math.floor(Math.random() * cards.length)
+            cards[idx].kept = true
+            transaction.update(dailyRef, { state, cards: cards })
+            return { state: 'lost', cardsToWrite: [cards[idx]] }
         }
         transaction.update(dailyRef, { state })
         return { state: 'ongoing' }
     })
 
     if (result && 'error' in result) return json({ error: result.error }, { status: result.status ?? 400 })
-    return json(result)
+    const { cardsToWrite, ...response } = result as { cardsToWrite?: WikiCard[], state: string }
+    if (cardsToWrite) {
+        await Promise.all(cardsToWrite.map((card: WikiCard) => cardsRef.add(card)))
+    }
+    return json({ ...response, ...(cardsToWrite && { kept: cardsToWrite.map(c => c.title) }) })
 }

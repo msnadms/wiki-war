@@ -2,16 +2,49 @@
     import { getPendingAction, isRoundLoading, registerCard, selectTarget, setBoss, startAction, type Action } from '$lib/battle.svelte';
     import { toggleUsed } from '$lib/carduses.svelte';
     import type { WikiCard } from '$lib/wikipedia.model';
-    import { onMount } from 'svelte';
+    import { onMount, untrack } from 'svelte';
+    import CounterTooltip from './CounterTooltip.svelte';
     import swords from '$lib/assets/swords.svg';
     import shield from '$lib/assets/shield.svg';
+    import block from '$lib/assets/block.svg'
     import hp from '$lib/assets/hp.svg';
 
-    let 
-        { article = $bindable(), index = 0, onTable = false }: 
-        { article: WikiCard; index?: number; onTable?: boolean; } = $props();
+    let
+        { article = $bindable(), index = 0, onTable = false, flipSignal = 0 }:
+        { article: WikiCard; index?: number; onTable?: boolean; flipSignal?: number } = $props();
+
+    $effect(() => {
+        flipSignal;
+        if (flipSignal === 0) return;
+        untrack(() => handleFlip());
+    });
+
     let flipped = $state(false);
     let flipClass: 'flip-out' | 'flip-in' | '' = $state('');
+    let attacked = $state(false);
+    let showTooltip = $state(false);
+    let tooltipX = $state(0);
+    let tooltipY = $state(0);
+
+    function handleCategoryEnter(e: MouseEvent) {
+        tooltipX = e.clientX;
+        tooltipY = e.clientY;
+        showTooltip = true;
+    }
+    function handleCategoryLeave() { showTooltip = false; }
+
+    let prevHp: number | undefined;
+    let attackedTimer: ReturnType<typeof setTimeout> | undefined;
+    $effect(() => {
+        const currentHp = article.stats!.hp;
+        if (prevHp !== undefined && currentHp < prevHp) {
+            clearTimeout(attackedTimer);
+            attacked = true;
+            attackedTimer = setTimeout(() => (attacked = false), 400);
+        }
+        prevHp = currentHp;
+        return () => clearTimeout(attackedTimer);
+    });
     const animationTime = $derived(onTable ? 75 : 1000)
     const isPotentialTarget = $derived(getPendingAction() !== null && !onTable);
     const disabled: boolean = $derived(article.stats!.hp <= 0);
@@ -23,7 +56,6 @@
         } else {
             registerCard(article)
         }
-        
     })
 
     function handleFlip() {
@@ -52,6 +84,7 @@
     class:disabled={disabled}
     class:madeMove={article.hasMadeMove}
     class:battleOver={article.battleOver}
+    class:kept={article.kept && !onTable}
     style="animation-delay: {index * animationTime}ms"
     onclick={!isPotentialTarget ? handleFlip : () => selectTarget(article)}
     onkeydown={(e) => e.key === 'Enter' && (isPotentialTarget ? selectTarget(article) : handleFlip())}
@@ -60,8 +93,9 @@
 >
     <div 
         class="content {flipClass}" 
-        class:flipped class:targetable={isPotentialTarget} 
+        class:flipped class:targetable={isPotentialTarget}
         class:disabled={disabled}
+        class:attacked
     >
         {#if flipped}
             {@render stats()}
@@ -70,7 +104,7 @@
                 <h4><a class="{article.rarity}" class:disabled href={article.pageUrl} onclick={(e) => e.stopPropagation()}>{article.title}</a></h4>
                 {#if article.category && article.stats}
                     <div class="stats-category">
-                        <p class="category-label">{article.category}</p>
+                        <p class="category-label" onmouseenter={handleCategoryEnter} onmouseleave={handleCategoryLeave}>{article.category}</p>
                         {@render statBlock()}
                     </div>
                 {/if}
@@ -85,32 +119,36 @@
     </div>
 </div>
 
+{#if showTooltip && article.category}
+    <CounterTooltip category={article.category} x={tooltipX} y={tooltipY} />
+{/if}
+
 {#snippet statBlock()}
     <div class="stats">
         <span><b>{article.stats?.hp}</b> <img src={hp} alt="HP" class="stat-icon" /></span>
         <span><b>{article.stats?.atk}</b> <img src={swords} alt="ATK" class="stat-icon" /></span>
-        <span><b>{article.stats?.def}</b> <img src={shield} alt="DEF" class="stat-icon" /></span>
+        <span><b>{article.stats?.def}</b> <img src={article.rarity === 'boss' ? shield : block} alt="DEF" class="stat-icon" /></span>
     </div>
 {/snippet}
 
 {#snippet stats()}
     <p class="rarity-label">{article.rarity}</p>
     {#if article.category}
-        <p class="category-label">{article.category}</p>
+        <p class="category-label" onmouseenter={handleCategoryEnter} onmouseleave={handleCategoryLeave}>{article.category}</p>
     {/if}
     {@render statBlock()}
-    <p>{article.extract.split(' ').length} words</p>
+    <p>{article.views} views in the last 5 years</p>
     {#if article.rarity !== 'boss'}
         <div class="actions">
             {#if !onTable}
                 <button disabled={disabled || article.hasMadeMove || article.battleOver || loading} onclick={(e) => handleAction(e, 'attack')}><img src={swords} alt="Attack" class="stat-icon" /></button>
-                <button disabled={disabled || article.hasMadeMove || article.battleOver || loading} onclick={(e) => handleAction(e, 'block')}><img src={shield} alt="Block" class="stat-icon" /></button>
+                <button disabled={disabled || article.hasMadeMove || article.battleOver || loading} onclick={(e) => handleAction(e, 'block')}><img src={block} alt="Block" class="stat-icon" /></button>
             {:else}
                 <button onclick={(e) => handleAction(e, 'use')}>Use</button>
             {/if}
         </div>
+        <div class="block"><b>{article.stats?.currentBlock}</b> BLOCK</div>
     {/if}
-    <div class="block"><b>{article.stats?.currentBlock}</b> BLOCK</div>
     {#if article.thumbnailUrl}
         <div class="card-image {article.rarity}">
             <img src={article.thumbnailUrl} alt={article.title} />
@@ -122,7 +160,7 @@
     .card {
         border: 3px solid var(--border);
         color: var(--fg);
-        background-color: var(--bg-secondary);
+        background-color: var(--bg);
         font: inherit;
         height: 375px;
         width: 200px;
@@ -136,33 +174,47 @@
     .card.rare,     .card-image.rare      { border-color: #a802b8; }
     .card.legendary,.card-image.legendary { border-color: #d3a200; }
     .card.boss,     .card-image.boss      { border-color: #c00000; }
-    .card.rare:not(.disabled) {
-        background: linear-gradient(-45deg, #7a1394, #d189f3, #791d9e);
+    .card.rare:not(.disabled),
+    .card.legendary:not(.disabled),
+    .card.boss:not(.disabled, .kept) {
         background-size: 400% 400%;
         animation: gradient 5s ease infinite, slideIn 0.4s ease both;
+    }
+    .card.rare:not(.disabled) {
+        background-image: linear-gradient(-45deg, #7a1394, #d189f3, #791d9e);
     }
     .card.legendary:not(.disabled) {
         box-shadow: 0 0 10px 7px #d3a200;
-        background: linear-gradient(-45deg, #d3a200, #ffe9a0, #b38a04);
-        background-size: 400% 400%;
-        animation: gradient 5s ease infinite, slideIn 0.4s ease both;
+        background-image: linear-gradient(-45deg, #d3a200, #ffe9a0, #b38a04);
     }
-    .card.boss:not(.disabled) {
-        background: linear-gradient(-45deg, #630000, #ff6565, #851010);
-        background-size: 400% 400%;
-        animation: gradient 5s ease infinite, slideIn 0.4s ease both;
+    .card.boss:not(.disabled, .kept) {
+        background-image: linear-gradient(-45deg, #630000, #ff6565, #851010);
     }
-    .card.disabled {
-        background: repeating-linear-gradient(-45deg, #8b0000, #8b0000 10px, #aa0000 10px, #aa0000 25px);
+    .card.disabled:not(.kept) {
+        background: repeating-linear-gradient(-45deg, #8b0000, #8b0000 20px, #aa0000 20px, #aa0000 40px);
         background-size: 200% 200%;
-        animation: move-stripes 10s linear infinite;
+        animation: move-stripes 10s linear infinite, slideIn 0.4s ease both;
         box-shadow: 0 0 10px 7px #800808;
         border-color: #800808;
         color: #e0e0e0;
     }
+    .content.attacked {
+        animation: attacked 0.4s ease;
+    }
+    @keyframes attacked {
+        0%   { transform: translateX(0); }
+        20%  { transform: translateX(-8px); }
+        40%  { transform: translateX(8px); }
+        60%  { transform: translateX(-6px); }
+        80%  { transform: translateX(6px); }
+        100% { transform: translateX(0); }
+    }
     .card.madeMove {
         border-color: #c5c5c5;
         border-style: dotted;
+    }
+    .card.kept {
+        box-shadow: 0 0 10px 7px #ffffff69;
     }
     @keyframes move-stripes {
         100% {
@@ -266,11 +318,6 @@
     }
     .actions button:hover {
         background-color: var(--bg);
-    }
-    .title-stats {
-        display: grid;
-        grid-template-columns: 1.5fr 1fr;
-        gap: 10px;
     }
     .title-category {
         display: grid;

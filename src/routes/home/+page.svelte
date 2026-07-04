@@ -5,7 +5,12 @@
     import type { WikiCard } from '$lib/wikipedia.model.js';
     import { authState } from '$lib/auth.svelte.js';
     import Card from '$lib/components/Card.svelte';
-    import { isRoundLoading, resetBattle, restoreBattleState, type BattleState } from '$lib/battle.svelte';
+    import { getNextBossAction, isRoundLoading, resetBattle, restoreBattleState, type BattleState } from '$lib/battle.svelte';
+    import swords from '$lib/assets/swords.svg';
+    import shield from '$lib/assets/shield.svg';
+    import flip from '$lib/assets/flip.svg';
+    import chest from '$lib/assets/chest.png'
+    import keyhole from '$lib/assets/keyhole.svg'
 
     let { form } = $props();
 
@@ -15,6 +20,8 @@
     let boss: WikiCard | null = $state(null)
     let loading = $state(false);
     let battleLoading = $derived(isRoundLoading())
+    const nextAction = $derived(getNextBossAction())
+    let flipSignal = $state(0)
     let formEl: HTMLFormElement;
 
     onMount(() => {
@@ -24,17 +31,26 @@
 
 <div class="container">
     {#if !show && !loading}
-        <button class="open" disabled={loading} onclick={() => show = true}>OPEN</button>
+        <img src={chest} alt="chest" class="chest" />
+        <button class="open" disabled={loading} onclick={() => show = true}><img src={keyhole} alt="OPEN" class="keyhole" /></button>
     {/if}
     {#if boss && articles && show}
         <div class="board">
-            <div>
-                <Card bind:article={boss} index={0} />
+            <div class="boss-display">
+                <div class="boss"><Card bind:article={boss} index={0} /></div>
+                {#if nextAction === 'attack'}
+                    <img src={swords} alt="ATK" class="action" title="Boss intends to attack next turn" />
+                {:else if nextAction === 'block'}
+                    <img src={shield} alt="DEF" class="action" title="Boss intends to heal next turn" />
+                {/if}
             </div>
-            <div class="article-list" class:battleLoading>
-                {#each articles as _, index}
-                    <Card bind:article={articles[index]} index={index + 1} />
-                {/each}
+            <div class="bottom-board">
+                <button onclick={() => flipSignal++}><img src={flip} alt="flip" class="flip" /></button>
+                <div class="article-list" class:battleLoading>
+                    {#each articles as _, index}
+                        <Card bind:article={articles[index]} index={index + 1} {flipSignal} />
+                    {/each}
+                </div>
             </div>
         </div>
     {/if}
@@ -99,16 +115,47 @@
     .article-list.battleLoading {
         opacity: 0.5;
     }
+    .bottom-board {
+        display: flex;
+        flex-direction: row;
+        margin-left: -110px;
+    }
+    .bottom-board .flip {
+        filter: invert(69%) sepia(0%) saturate(13%) hue-rotate(161deg) brightness(86%) contrast(97%);
+        width: 100px;
+        height: 100px;
+    }
+    .bottom-board button {
+        background-color: transparent;
+        border: none;
+        align-self: center;
+        cursor: pointer;
+        margin-right: 10px;
+    }
+    .bottom-board button:hover {
+        transform: scale(1.05);
+    }
+    .chest {
+        width: 600px;
+        height: 600px;
+    }
+    .keyhole {
+        width: 50px;
+        height: 50px;
+    }
     .open {
         margin-top: 20px;
-        width: 150px;
-        height: 150px;
+        width: 140px;
+        height: 130px;
         font-size: 24px;
         font-family: inherit;
         letter-spacing: 0.1em;
         color: var(--fg-secondary);
-        border: 1px solid #d3a200;
-        border-radius: 150px;
+        border: 5px double black;
+        border-bottom-right-radius: 150px;
+        border-bottom-left-radius: 150px;
+        position: absolute;
+        top: 240px;
     }
     .open:hover {
         cursor: pointer;
@@ -117,6 +164,23 @@
         position: absolute;
         top: 10px;
         left: 210px;
+    }
+    .boss-display {
+        display: grid;
+        gap: 50px;
+        grid-template-columns: repeat(3, 1fr);
+        margin-left: 10px;
+    }
+    .boss-display img {
+        align-self: center;
+        height: 100px;
+        width: 100px;
+    }
+    .boss-display .action {
+        filter: invert(12%) sepia(65%) saturate(2827%) hue-rotate(346deg) brightness(97%) contrast(119%);
+    }
+    .boss-display .boss {
+        grid-column-start: 2;
     }
     .error {
         color: red;
